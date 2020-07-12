@@ -59,7 +59,7 @@ namespace Server
 
             app.UseEndpoints(endpoints =>
             {
-                endpoints.MapRoomWebsocketEndpoint("/api/room/{id}");
+                endpoints.MapRoomWebsocketEndpoint("/api/rooms/{id}");
                 endpoints.MapControllerRoute(
                     name: "default",
                     pattern: "{controller}/{action=Index}/{id?}");

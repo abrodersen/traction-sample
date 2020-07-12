@@ -17,7 +17,7 @@ export class RoomMenu extends Component {
     return (
       <ul>
           {r.map(room =>
-            <li key={room.id}><Link to={'/rooms/'+ room.id} replace>{room.name}</Link></li>)
+            <li key={room.id}><Link to={'/room/'+ room.id} replace>{room.name}</Link></li>)
           }
       </ul>
     );

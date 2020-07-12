@@ -13,19 +13,21 @@ export class ChatRoom extends Component {
       buffer: '',
     };
 
-    this.roomId = id;
     this.sendMessage = this.sendMessage.bind(this);
+    this.handleChange = this.handleChange.bind(this);
   }
 
   componentDidMount() {
-
+    console.log('component did mount')
+    this.connect();
   }
 
   connect() {
-    var ws = new WebSocket('wss://' + location.host + '/rooms/' + this.roomId);
+    console.log('initializing web socket connection')
+    var ws = new WebSocket('ws://' + location.host + '/api/rooms/' + this.state.room);
     let self = this;
     ws.onopen = () => {
-      console.log('room id ' + self.roomId + ' connected')
+      console.log('room id ' + self.state.room + ' connected')
       self.setState({ ws: ws });
     }
     
