@@ -4,7 +4,6 @@ using Microsoft.Extensions.Hosting;
 using System.Collections.Generic;
 using System.Net.WebSockets;
 using System;
-using System.Reactive;
 using System.Text;
 using System.Linq;
 using System.Collections.Concurrent;
@@ -34,6 +33,10 @@ namespace traction_sample
     {
         public Task Send {get;set;}
         public CancellationTokenSource CancelSend {get;set;}
+
+        public string Message {get;set;}
+        public ClientData Client {get; set;}
+        public string Room {get;set;}
     }
 
     internal class ConnectionManagementService : BackgroundService
@@ -62,7 +65,7 @@ namespace traction_sample
                 Handle = requestEnd,
             };
 
-            BeginReceive(socket, data);
+            BeginReceive(data);
 
             _pendingConnections.Enqueue(data);
 
@@ -71,12 +74,12 @@ namespace traction_sample
             return requestEnd.Task;
         }
 
-        private static void BeginReceive(WebSocket socket, ClientData data)
+        private static void BeginReceive(ClientData data)
         {
             var rxBuffer = new byte[BUFFER_SIZE];
             var rxCancel = new CancellationTokenSource();
 
-            data.Receive = socket.ReceiveAsync(new ArraySegment<byte>(rxBuffer), rxCancel.Token);
+            data.Receive = data.Socket.ReceiveAsync(new ArraySegment<byte>(rxBuffer), rxCancel.Token);
             data.Buffers.Add(rxBuffer);
             data.CancelReceive = rxCancel;
         }
@@ -88,12 +91,40 @@ namespace traction_sample
             data.CancelReceive = rxCancel;
         }
 
-        private static void BeginSend(string message, WebSocket socket, SendData data)
+        private static bool IsSocketDead(WebSocket socket)
         {
-            var encoded = Encoding.UTF8.GetBytes(message);
+            return socket.State == WebSocketState.Aborted ||
+                socket.State == WebSocketState.Closed ||
+                socket.State == WebSocketState.CloseReceived ||
+                socket.State == WebSocketState.CloseSent;
+        }
+
+        private void BeginSend(SendData data)
+        {
             var sendCancel = new CancellationTokenSource();
-            data.Send = socket.SendAsync(new ArraySegment<byte>(encoded), WebSocketMessageType.Text, true, sendCancel.Token);
+            if (data.Client != null)
+            {
+                var encoded = Encoding.UTF8.GetBytes(data.Message);
+                data.Send = data.Client.Socket.SendAsync(new ArraySegment<byte>(encoded), WebSocketMessageType.Text, true, sendCancel.Token);
+            }
+            else if (data.Room != null)
+            {
+                data.Send = _backplane.Publish(data.Room, data.Message, sendCancel.Token);
+            }
+
             data.CancelSend = sendCancel;
+        }
+
+        private IEnumerable<SendData> SendToRoom(string message, RoomData data)
+        {
+            foreach (var client in data.Clients)
+            {
+                var sendData = new SendData();
+                sendData.Message = message;
+                sendData.Client = client;
+                BeginSend(sendData);
+                yield return sendData;
+            }
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -127,14 +158,26 @@ namespace traction_sample
                 var clientRxTaskList = new List<Task<WebSocketReceiveResult>>();
                 var sendTaskList = new List<Task>();
 
+                var newSendOperations = new List<SendData>();
+
                 foreach (var (idx, pair) in _rooms.Select((pair, idx) => (idx, pair)))
                 {
+                    roomList.Add(pair.Value);
                     roomRxTaskList.Add(pair.Value.Receive);
 
-                    foreach (var client in pair.Value.Clients)
+                    pair.Value.Clients.ForEach(client =>
                     {
-                        clientRxTaskList.Add(client.Receive);
-                    }
+                        if (IsSocketDead(client.Socket))
+                        {
+                            client.Socket.Abort();
+                            pair.Value.Clients.Remove(client);
+                        }
+                        else
+                        {
+                            clientList.Add(client);
+                            clientRxTaskList.Add(client.Receive);
+                        }
+                    });
                 }
 
                 foreach (var send in _sendOperations)
@@ -155,27 +198,81 @@ namespace traction_sample
 
                     if (whenRoom.Result.IsCompletedSuccessfully)
                     {
-                        foreach (var client in room.Clients)
+                        _sendOperations.AddRange(SendToRoom(whenRoom.Result.Result, room));
+                    }
+                    else
+                    {
+                        room.Subscription?.Dispose();
+                        room.Subscription = null;
+                        room.Subscription = _backplane.Subscribe(room.Room);
+                        BeginReceive(room);
+                    }
+                }
+                else if (completed == whenClient)
+                {
+                    var clientIdx = clientRxTaskList.IndexOf(whenClient.Result);
+                    var client = clientList[clientIdx];
+                    var room = _rooms[client.Room];
+
+                    if (whenClient.Result.IsCompletedSuccessfully)
+                    {
+                        var clientRxResult = whenClient.Result.Result;
+                        if (clientRxResult.EndOfMessage)
                         {
-                            var data = new SendData();
-                            BeginSend(whenRoom.Result.Result, client.Socket, data);
-                            _sendOperations.Add(data);
+                            var allBytes = new List<byte>();
+                            foreach (var buffer in client.Buffers)
+                            {
+                                allBytes.AddRange(buffer);
+                            }
+                            var message = Encoding.UTF8.GetString(allBytes.ToArray());
+
+                            newSendOperations.AddRange(SendToRoom(message, room));
+
+                            var upstream = new SendData();
+                            upstream.Message = message;
+                            upstream.Room = room.Room;
+                            BeginSend(upstream);
+                            newSendOperations.Add(upstream);
+                        }
+                        else
+                        {
+                            BeginReceive(client);
                         }
                     }
-
-                    
-                }
-
-                var taskIdx = await Task.WhenAny(taskList)
-
-                if (taskIdx < totalRooms)
-                {
-                    var newMessageRoom = roomList[taskIdx];
-                    if (newMessageRoom.Receive.IsCompletedSuccessfully)
+                    else
                     {
-                        var msg = newMessageRoom.Receive.Result;
+                        client.Socket.Abort();
+                        client.Receive = null;
+                        client.CancelReceive = null;
                     }
                 }
+                else if (completed == whenSend)
+                {
+                    var sendIdx = sendTaskList.IndexOf(whenSend.Result);
+                    var send = _sendOperations[sendIdx];
+
+                    if (whenSend.Result.IsCompletedSuccessfully)
+                    {
+                        _sendOperations.RemoveAt(sendIdx);
+                        send.Send = null;
+                        send.Client = null;
+                        send.CancelSend = null;
+                    }
+                    else if (send.Client != null && IsSocketDead(send.Client.Socket))
+                    {
+                        send.Client.Socket.Abort();
+                        _sendOperations.RemoveAt(sendIdx);
+                        send.Send = null;
+                        send.Client = null;
+                        send.CancelSend = null;
+                    }
+                    else
+                    {
+                        BeginSend(send);
+                    }
+                }
+
+                _sendOperations.AddRange(newSendOperations);
             }
         }
     }
