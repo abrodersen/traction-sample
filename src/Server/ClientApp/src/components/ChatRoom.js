@@ -75,7 +75,7 @@ export class ChatRoom extends Component {
       <div>
         <h1>{this.state.id}</h1>
 
-        <textarea readOnly="true" value={this.state.buffer} />
+        <textarea readOnly={true} value={this.state.buffer} />
 
         <input type="text" value={this.state.message} onChange={this.handleChange} />
 

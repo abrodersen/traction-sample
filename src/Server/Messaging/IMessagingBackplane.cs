@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace traction_sample
+namespace Server.Messaging
 {
     public interface IMessagingBackplane
     {

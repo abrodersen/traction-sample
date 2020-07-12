@@ -5,8 +5,10 @@ using Microsoft.AspNetCore.SpaServices.ReactDevelopmentServer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Server.Messaging;
+using Server.Middleware;
 
-namespace traction_sample
+namespace Server
 {
     public class Startup
     {
@@ -20,6 +22,9 @@ namespace traction_sample
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
+            services.AddSingleton<ConnectionManagementService>();
+            services.AddHostedService<ConnectionManagementService>();
+            services.AddSingleton<IMessagingBackplane, DummyBackplane>();
 
             services.AddControllersWithViews();
 
@@ -54,6 +59,7 @@ namespace traction_sample
 
             app.UseEndpoints(endpoints =>
             {
+                endpoints.MapRoomWebsocketEndpoint("/api/room/{id}");
                 endpoints.MapControllerRoute(
                     name: "default",
                     pattern: "{controller}/{action=Index}/{id?}");

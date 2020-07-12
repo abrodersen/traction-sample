@@ -1,4 +1,5 @@
 import React, { Component } from 'react';
+import { Link } from 'react-router-dom'; 
 
 export class RoomMenu extends Component {
   static displayName = RoomMenu.name;
@@ -15,8 +16,8 @@ export class RoomMenu extends Component {
   static renderRoomsList(r) {
     return (
       <ul>
-          {rooms.map(room =>
-            <li><Link to="/rooms/{room.id}">{room.name}</Link></li>)
+          {r.map(room =>
+            <li key={room.id}><Link to={'/rooms/'+ room.id} replace>{room.name}</Link></li>)
           }
       </ul>
     );
@@ -37,7 +38,7 @@ export class RoomMenu extends Component {
   }
 
   async populateRoomData() {
-    const response = await fetch('rooms');
+    const response = await fetch('/api/rooms');
     const data = await response.json();
     this.setState({ rooms: data, loading: false });
   }

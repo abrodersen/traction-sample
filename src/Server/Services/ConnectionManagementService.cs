@@ -7,8 +7,9 @@ using System;
 using System.Text;
 using System.Linq;
 using System.Collections.Concurrent;
+using Server.Messaging;
 
-namespace traction_sample
+namespace Server
 {
     internal class RoomData 
     {
@@ -185,11 +186,26 @@ namespace traction_sample
                     sendTaskList.Add(send.Send);
                 }
 
-                var whenRoom = Task.WhenAny(roomRxTaskList);
-                var whenClient = Task.WhenAny(clientRxTaskList);
-                var whenSend = Task.WhenAny(sendTaskList);
+                Task<Task<string>> whenRoom = null;
+                if (roomRxTaskList.Any())
+                {
+                    whenRoom = Task.WhenAny(roomRxTaskList);
+                }
 
-                var completed = await Task.WhenAny(whenRoom, whenClient, whenSend).ConfigureAwait(false);
+                Task<Task<WebSocketReceiveResult>> whenClient = null;
+                if (clientRxTaskList.Any())
+                {
+                    whenClient = Task.WhenAny(clientRxTaskList);
+                }
+
+                Task<Task> whenSend = null;
+                if (sendTaskList.Any())
+                {
+                    whenSend = Task.WhenAny(sendTaskList);
+                }
+
+                var globalTaskList = new Task[] { whenRoom, whenClient, whenSend, _newClient.Task}.Where(t => t != null);
+                var completed = await Task.WhenAny(globalTaskList).ConfigureAwait(false);
 
                 if (completed == whenRoom)
                 {
