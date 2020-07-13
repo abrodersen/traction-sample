@@ -297,6 +297,7 @@ namespace Server
                                 }
                                 var message = Encoding.UTF8.GetString(allBytes.ToArray());
                                 _logger.LogDebug("received message {message}", message);
+                                client.Buffers.Clear();
 
                                 newSendOperations.AddRange(SendToRoom(message, room, client.Id));
 
