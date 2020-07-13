@@ -22,7 +22,7 @@ namespace Server.Middleware
             if (context.WebSockets.IsWebSocketRequest && roomId != null)
             {
                 var socket = await context.WebSockets.AcceptWebSocketAsync();
-                await svc.RegisterClient(roomId, socket);
+                await svc.RegisterConnection(roomId, socket);
             }
             else
             {

@@ -26,7 +26,7 @@ namespace Server.Messaging
 
         public async Task<string> Next(CancellationToken token)
         {
-            await Task.Delay(60000);
+            await Task.Delay(2500);
             return (_count++).ToString();
         }
     }

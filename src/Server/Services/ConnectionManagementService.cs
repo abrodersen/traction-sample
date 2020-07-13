@@ -23,12 +23,19 @@ namespace Server
 
     internal class ClientData
     {
+        public long Id {get;set;}
         public string Room {get; set;}
         public TaskCompletionSource<bool> Handle {get;set;}
         public WebSocket Socket {get;set;}
         public List<byte[]> Buffers {get;set;} = new List<byte[]>();
         public Task<WebSocketReceiveResult> Receive {get;set;}
         public CancellationTokenSource CancelReceive {get;set;}
+    }
+
+    internal enum SendType
+    {
+        Client,
+        Backplane,
     }
 
     internal class SendData
@@ -41,7 +48,7 @@ namespace Server
         public string Room {get;set;}
     }
 
-    internal class ConnectionManagementService : BackgroundService
+    internal class ConnectionManagementService : BackgroundService, IConnectionManagementService
     {
         private readonly SortedList<string, RoomData> _rooms = new SortedList<string, RoomData>();
         private readonly List<SendData> _sendOperations = new List<SendData>();
@@ -50,6 +57,8 @@ namespace Server
 
         private readonly IMessagingBackplane _backplane;
         private readonly ILogger<ConnectionManagementService> _logger;
+
+        private long _connectionId = 0;
 
         public ConnectionManagementService(IMessagingBackplane backplane, ILogger<ConnectionManagementService> logger)
         {
@@ -61,12 +70,13 @@ namespace Server
 
         public const int BUFFER_SIZE = 1 << 12;
 
-        public Task RegisterClient(string roomId, WebSocket socket)
+        public Task RegisterConnection(string roomId, WebSocket socket)
         {
             _logger.LogInformation("new client registered in room {room}", roomId);
             var requestEnd = new TaskCompletionSource<bool>();
             var data = new ClientData
             {
+                Id = Interlocked.Increment(ref _connectionId),
                 Room = roomId,
                 Socket = socket,
                 Handle = requestEnd,
@@ -113,24 +123,32 @@ namespace Server
             var sendCancel = new CancellationTokenSource();
             if (data.Client != null)
             {
+                _logger.LogDebug("sending data to client {client}", data.Client.Id);
                 var encoded = Encoding.UTF8.GetBytes(data.Message);
                 data.Send = data.Client.Socket.SendAsync(new ArraySegment<byte>(encoded), WebSocketMessageType.Text, true, sendCancel.Token);
             }
-            else if (data.Room != null)
+            else
             {
+                _logger.LogDebug("sending data upstream channel for room {room}", data.Room);
                 data.Send = _backplane.Publish(data.Room, data.Message, sendCancel.Token);
             }
 
             data.CancelSend = sendCancel;
         }
 
-        private IEnumerable<SendData> SendToRoom(string message, RoomData data)
+        private IEnumerable<SendData> SendToRoom(string message, RoomData data, long? sender = null)
         {
             foreach (var client in data.Clients)
             {
+                if (client.Id == sender)
+                {
+                    continue;
+                }
+
                 var sendData = new SendData();
                 sendData.Message = message;
                 sendData.Client = client;
+                sendData.Room = data.Room;
                 BeginSend(sendData);
                 yield return sendData;
             }
@@ -183,12 +201,12 @@ namespace Server
                         roomList.Add(pair.Value);
                         roomRxTaskList.Add(pair.Value.Receive);
 
-                        for (int i = pair.Value.Clients.Count - 1; i > 0; i--)
+                        for (int i = pair.Value.Clients.Count - 1; i >= 0; i--)
                         {
                             var client = pair.Value.Clients[i];
                             if (IsSocketDead(client.Socket))
                             {
-                                _logger.LogDebug("detected a dead client in room {room}", client.Room);
+                                _logger.LogDebug("detected a dead client {client} in room {room}", client.Id, client.Room);
                                 client.Socket.Abort();
                                 pair.Value.Clients.RemoveAt(i);
                             }
@@ -198,18 +216,20 @@ namespace Server
                                 clientRxTaskList.Add(client.Receive);
                             }
                         }
-
-                        pair.Value.Clients.ForEach(client =>
-                        {
-                            
-                        });
                     }
 
                     _logger.LogDebug("total rooms = {rooms}, total clients = {clients}", roomList.Count, clientList.Count);
 
                     foreach (var send in _sendOperations)
                     {
-                        sendTaskList.Add(send.Send);
+                        if (send.Client != null && IsSocketDead(send.Client.Socket))
+                        {
+                            _logger.LogDebug("killing send operation due to dead client {client}", send.Client.Id);
+                        }
+                        else
+                        {
+                            sendTaskList.Add(send.Send);
+                        }
                     }
 
                     _logger.LogDebug("total pending send operations = {sends}", _sendOperations.Count);
@@ -278,7 +298,7 @@ namespace Server
                                 var message = Encoding.UTF8.GetString(allBytes.ToArray());
                                 _logger.LogDebug("received message {message}", message);
 
-                                newSendOperations.AddRange(SendToRoom(message, room));
+                                newSendOperations.AddRange(SendToRoom(message, room, client.Id));
 
                                 var upstream = new SendData();
                                 upstream.Message = message;
@@ -301,7 +321,14 @@ namespace Server
                     {
                         var sendIdx = sendTaskList.IndexOf(whenSend.Result);
                         var send = _sendOperations[sendIdx];
-                        _logger.LogDebug("received signal on send operation for room {room}", send.Room);
+                        if (send.Client != null)
+                        {
+                            _logger.LogDebug("received signal on client send operation for client {client}", send.Client.Id);
+                        }
+                        else
+                        {
+                            _logger.LogDebug("received signal on backplane send operation for room {room}", send.Room);
+                        }
 
                         if (whenSend.Result.IsCompletedSuccessfully)
                         {
