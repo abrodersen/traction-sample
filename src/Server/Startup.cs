@@ -23,7 +23,8 @@ namespace Server
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddSingleton<ConnectionManagementService>();
-            services.AddHostedService<ConnectionManagementService>();
+            services.AddSingleton<IHostedService, ConnectionManagementService>(
+	            serviceProvider => serviceProvider.GetService<ConnectionManagementService>());
             services.AddSingleton<IMessagingBackplane, DummyBackplane>();
 
             services.AddControllersWithViews();

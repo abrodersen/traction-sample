@@ -24,7 +24,7 @@ export class ChatRoom extends Component {
 
   connect() {
     console.log('initializing web socket connection')
-    var ws = new WebSocket('ws://' + location.host + '/api/rooms/' + this.state.room);
+    let ws = new WebSocket('ws://' + location.host + '/api/rooms/' + this.state.room);
     let self = this;
     ws.onopen = () => {
       console.log('room id ' + self.state.room + ' connected')
@@ -40,7 +40,7 @@ export class ChatRoom extends Component {
       console.error('ws error: ', err.message);
       ws.close();
 
-      setTimeout(self.reconnect, 0);
+      setTimeout(self.reconnect, 10);
     }
 
     ws.onmessage = e => {

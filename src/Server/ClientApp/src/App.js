@@ -7,7 +7,7 @@ import { Counter } from './components/Counter';
 
 import './custom.css'
 import { RoomMenu } from './components/RoomMenu';
-import { ChatRoom } from './components/ChatRoom';
+import { Chat } from './components/Chat';
 
 export default class App extends Component {
   static displayName = App.name;
@@ -17,7 +17,7 @@ export default class App extends Component {
       <Layout>
         <Route exact path='/' component={Home} />
         <Route path='/rooms' component={RoomMenu} />
-        <Route path='/room/:id' component={ChatRoom} />
+        <Route path='/room/:id' component={Chat} />
       </Layout>
     );
   }

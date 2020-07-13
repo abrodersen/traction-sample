@@ -12,7 +12,7 @@ namespace Server.Messaging
 
         public ISubscription Subscribe(string topic)
         {
-            throw new System.NotImplementedException();
+            return new DummySubscription();
         }
     }
 
@@ -26,7 +26,7 @@ namespace Server.Messaging
 
         public async Task<string> Next(CancellationToken token)
         {
-            await Task.Delay(1000);
+            await Task.Delay(60000);
             return (_count++).ToString();
         }
     }

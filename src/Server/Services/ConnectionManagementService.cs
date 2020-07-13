@@ -8,6 +8,7 @@ using System.Text;
 using System.Linq;
 using System.Collections.Concurrent;
 using Server.Messaging;
+using Microsoft.Extensions.Logging;
 
 namespace Server
 {
@@ -45,19 +46,24 @@ namespace Server
         private readonly SortedList<string, RoomData> _rooms = new SortedList<string, RoomData>();
         private readonly List<SendData> _sendOperations = new List<SendData>();
         private readonly ConcurrentQueue<ClientData> _pendingConnections = new ConcurrentQueue<ClientData>();
-        private TaskCompletionSource<bool> _newClient = new TaskCompletionSource<bool>();
+        private SemaphoreSlim _newClient = new SemaphoreSlim(0);
 
         private readonly IMessagingBackplane _backplane;
+        private readonly ILogger<ConnectionManagementService> _logger;
 
-        public ConnectionManagementService(IMessagingBackplane backplane)
+        public ConnectionManagementService(IMessagingBackplane backplane, ILogger<ConnectionManagementService> logger)
         {
             _backplane = backplane;
+            _logger = logger;
+
+            _logger.LogDebug("connection management service initialized");
         }
 
         public const int BUFFER_SIZE = 1 << 12;
 
         public Task RegisterClient(string roomId, WebSocket socket)
         {
+            _logger.LogInformation("new client registered in room {room}", roomId);
             var requestEnd = new TaskCompletionSource<bool>();
             var data = new ClientData
             {
@@ -70,7 +76,9 @@ namespace Server
 
             _pendingConnections.Enqueue(data);
 
-            _newClient.TrySetResult(true);
+            _logger.LogDebug("sending signal to wake event loop");
+            _newClient.Release();
+            _logger.LogDebug("signal sent");
 
             return requestEnd.Task;
         }
@@ -130,165 +138,204 @@ namespace Server
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            while (true)
+            try
             {
-                while (_pendingConnections.TryDequeue(out var client))
+                while (true)
                 {
-                    RoomData room;
-                    if (!_rooms.TryGetValue(client.Room, out room))
+                    _logger.LogDebug("loop start");
+
+                    while (_pendingConnections.TryDequeue(out var client))
                     {
-                        room = new RoomData
+                        _logger.LogDebug("accepting new connection in room {room}", client.Room);
+                        RoomData room;
+                        if (!_rooms.TryGetValue(client.Room, out room))
                         {
-                            Room = client.Room,
-                            Subscription = _backplane.Subscribe(client.Room),
-                            Clients = new List<ClientData> { client },
-                        };
-                        _rooms.TryAdd(client.Room, room);
-                    }
-                    else
-                    {
-                        room.Clients.Add(client);
-                    }
-                    BeginReceive(room);
-                }
-
-
-                var roomList = new List<RoomData>();
-                var roomRxTaskList = new List<Task<string>>();
-                var clientList = new List<ClientData>();
-                var clientRxTaskList = new List<Task<WebSocketReceiveResult>>();
-                var sendTaskList = new List<Task>();
-
-                var newSendOperations = new List<SendData>();
-
-                foreach (var (idx, pair) in _rooms.Select((pair, idx) => (idx, pair)))
-                {
-                    roomList.Add(pair.Value);
-                    roomRxTaskList.Add(pair.Value.Receive);
-
-                    pair.Value.Clients.ForEach(client =>
-                    {
-                        if (IsSocketDead(client.Socket))
-                        {
-                            client.Socket.Abort();
-                            pair.Value.Clients.Remove(client);
+                            _logger.LogDebug("room {room} does not exist, creating it now", client.Room);
+                            room = new RoomData
+                            {
+                                Room = client.Room,
+                                Subscription = _backplane.Subscribe(client.Room),
+                                Clients = new List<ClientData> { client },
+                            };
+                            _rooms.TryAdd(client.Room, room);
                         }
                         else
                         {
-                            clientList.Add(client);
-                            clientRxTaskList.Add(client.Receive);
+                            room.Clients.Add(client);
+                            _logger.LogDebug("room {room} already exists with {clients} cients", client.Room, room.Clients.Count);
                         }
-                    });
-                }
 
-                foreach (var send in _sendOperations)
-                {
-                    sendTaskList.Add(send.Send);
-                }
-
-                Task<Task<string>> whenRoom = null;
-                if (roomRxTaskList.Any())
-                {
-                    whenRoom = Task.WhenAny(roomRxTaskList);
-                }
-
-                Task<Task<WebSocketReceiveResult>> whenClient = null;
-                if (clientRxTaskList.Any())
-                {
-                    whenClient = Task.WhenAny(clientRxTaskList);
-                }
-
-                Task<Task> whenSend = null;
-                if (sendTaskList.Any())
-                {
-                    whenSend = Task.WhenAny(sendTaskList);
-                }
-
-                var globalTaskList = new Task[] { whenRoom, whenClient, whenSend, _newClient.Task}.Where(t => t != null);
-                var completed = await Task.WhenAny(globalTaskList).ConfigureAwait(false);
-
-                if (completed == whenRoom)
-                {
-                    var roomIdx = roomRxTaskList.IndexOf(whenRoom.Result);
-                    var room = roomList[roomIdx];
-
-                    if (whenRoom.Result.IsCompletedSuccessfully)
-                    {
-                        _sendOperations.AddRange(SendToRoom(whenRoom.Result.Result, room));
-                    }
-                    else
-                    {
-                        room.Subscription?.Dispose();
-                        room.Subscription = null;
-                        room.Subscription = _backplane.Subscribe(room.Room);
+                        _logger.LogDebug("opening backplane channel for room {room}", client.Room);
                         BeginReceive(room);
                     }
-                }
-                else if (completed == whenClient)
-                {
-                    var clientIdx = clientRxTaskList.IndexOf(whenClient.Result);
-                    var client = clientList[clientIdx];
-                    var room = _rooms[client.Room];
 
-                    if (whenClient.Result.IsCompletedSuccessfully)
+
+                    var roomList = new List<RoomData>();
+                    var roomRxTaskList = new List<Task<string>>();
+                    var clientList = new List<ClientData>();
+                    var clientRxTaskList = new List<Task<WebSocketReceiveResult>>();
+                    var sendTaskList = new List<Task>();
+
+                    var newSendOperations = new List<SendData>();
+
+                    foreach (var (idx, pair) in _rooms.Select((pair, idx) => (idx, pair)))
                     {
-                        var clientRxResult = whenClient.Result.Result;
-                        if (clientRxResult.EndOfMessage)
+                        roomList.Add(pair.Value);
+                        roomRxTaskList.Add(pair.Value.Receive);
+
+                        for (int i = pair.Value.Clients.Count - 1; i > 0; i--)
                         {
-                            var allBytes = new List<byte>();
-                            foreach (var buffer in client.Buffers)
+                            var client = pair.Value.Clients[i];
+                            if (IsSocketDead(client.Socket))
                             {
-                                allBytes.AddRange(buffer);
+                                _logger.LogDebug("detected a dead client in room {room}", client.Room);
+                                client.Socket.Abort();
+                                pair.Value.Clients.RemoveAt(i);
                             }
-                            var message = Encoding.UTF8.GetString(allBytes.ToArray());
+                            else
+                            {
+                                clientList.Add(client);
+                                clientRxTaskList.Add(client.Receive);
+                            }
+                        }
 
-                            newSendOperations.AddRange(SendToRoom(message, room));
+                        pair.Value.Clients.ForEach(client =>
+                        {
+                            
+                        });
+                    }
 
-                            var upstream = new SendData();
-                            upstream.Message = message;
-                            upstream.Room = room.Room;
-                            BeginSend(upstream);
-                            newSendOperations.Add(upstream);
+                    _logger.LogDebug("total rooms = {rooms}, total clients = {clients}", roomList.Count, clientList.Count);
+
+                    foreach (var send in _sendOperations)
+                    {
+                        sendTaskList.Add(send.Send);
+                    }
+
+                    _logger.LogDebug("total pending send operations = {sends}", _sendOperations.Count);
+
+                    Task<Task<string>> whenRoom = null;
+                    if (roomRxTaskList.Any())
+                    {
+                        whenRoom = Task.WhenAny(roomRxTaskList);
+                    }
+
+                    Task<Task<WebSocketReceiveResult>> whenClient = null;
+                    if (clientRxTaskList.Any())
+                    {
+                        whenClient = Task.WhenAny(clientRxTaskList);
+                    }
+
+                    Task<Task> whenSend = null;
+                    if (sendTaskList.Any())
+                    {
+                        whenSend = Task.WhenAny(sendTaskList);
+                    }
+
+                    var newClientTask = _newClient.WaitAsync();
+                    var globalTaskList = new Task[] { whenRoom, whenClient, whenSend, newClientTask}.Where(t => t != null).ToList();
+                    _logger.LogDebug("waiting for signal from {tasks} tasks", globalTaskList.Count);
+                    var completed = await Task.WhenAny(globalTaskList).ConfigureAwait(false);                
+                    _logger.LogDebug("awoke");
+
+                    if (completed == whenRoom)
+                    {
+                        var roomIdx = roomRxTaskList.IndexOf(whenRoom.Result);
+                        var room = roomList[roomIdx];
+                        _logger.LogDebug("received signal on upstream channel for room {room}", room.Room);
+
+                        if (whenRoom.Result.IsCompletedSuccessfully)
+                        {
+                            _sendOperations.AddRange(SendToRoom(whenRoom.Result.Result, room));
                         }
                         else
                         {
+                            room.Subscription?.Dispose();
+                            room.Subscription = null;
+                            room.Subscription = _backplane.Subscribe(room.Room);
+                        }
+
+                        _logger.LogDebug("beginning new receive operation on backplane channel");
+                        BeginReceive(room);
+                    }
+                    else if (completed == whenClient)
+                    {
+                        var clientIdx = clientRxTaskList.IndexOf(whenClient.Result);
+                        var client = clientList[clientIdx];
+                        var room = _rooms[client.Room];
+                        _logger.LogDebug("received signal on client channel for room {room}", room.Room);
+
+                        if (whenClient.Result.IsCompletedSuccessfully)
+                        {
+                            var clientRxResult = whenClient.Result.Result;
+                            if (clientRxResult.EndOfMessage)
+                            {
+                                var allBytes = new List<byte>();
+                                foreach (var buffer in client.Buffers)
+                                {
+                                    allBytes.AddRange(buffer);
+                                }
+                                var message = Encoding.UTF8.GetString(allBytes.ToArray());
+                                _logger.LogDebug("received message {message}", message);
+
+                                newSendOperations.AddRange(SendToRoom(message, room));
+
+                                var upstream = new SendData();
+                                upstream.Message = message;
+                                upstream.Room = room.Room;
+                                BeginSend(upstream);
+                                newSendOperations.Add(upstream);
+                            }
+
+                            _logger.LogDebug("queuing up new receive operation on client channel");
                             BeginReceive(client);
                         }
+                        else
+                        {
+                            client.Socket.Abort();
+                            client.Receive = null;
+                            client.CancelReceive = null;
+                        }
                     }
-                    else
+                    else if (completed == whenSend)
                     {
-                        client.Socket.Abort();
-                        client.Receive = null;
-                        client.CancelReceive = null;
-                    }
-                }
-                else if (completed == whenSend)
-                {
-                    var sendIdx = sendTaskList.IndexOf(whenSend.Result);
-                    var send = _sendOperations[sendIdx];
+                        var sendIdx = sendTaskList.IndexOf(whenSend.Result);
+                        var send = _sendOperations[sendIdx];
+                        _logger.LogDebug("received signal on send operation for room {room}", send.Room);
 
-                    if (whenSend.Result.IsCompletedSuccessfully)
-                    {
-                        _sendOperations.RemoveAt(sendIdx);
-                        send.Send = null;
-                        send.Client = null;
-                        send.CancelSend = null;
+                        if (whenSend.Result.IsCompletedSuccessfully)
+                        {
+                            _sendOperations.RemoveAt(sendIdx);
+                            send.Send = null;
+                            send.Client = null;
+                            send.CancelSend = null;
+                        }
+                        else if (send.Client != null && IsSocketDead(send.Client.Socket))
+                        {
+                            send.Client.Socket.Abort();
+                            _sendOperations.RemoveAt(sendIdx);
+                            send.Send = null;
+                            send.Client = null;
+                            send.CancelSend = null;
+                        }
+                        else
+                        {
+                            BeginSend(send);
+                        }
                     }
-                    else if (send.Client != null && IsSocketDead(send.Client.Socket))
+                    else if (completed == newClientTask)
                     {
-                        send.Client.Socket.Abort();
-                        _sendOperations.RemoveAt(sendIdx);
-                        send.Send = null;
-                        send.Client = null;
-                        send.CancelSend = null;
+                        _logger.LogDebug("receivied signal on new client channel");
                     }
-                    else
-                    {
-                        BeginSend(send);
-                    }
-                }
 
-                _sendOperations.AddRange(newSendOperations);
+                    _sendOperations.AddRange(newSendOperations);
+
+                    _logger.LogDebug("loop end");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogCritical(ex, "unhandled exception in core event loop");
             }
         }
     }
