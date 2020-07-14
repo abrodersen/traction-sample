@@ -316,9 +316,6 @@ namespace Server.Test
             backplane.Setup(b => b.Subscribe(It.IsAny<string>()))
                 .Returns(subscription.Object);
 
-            string topicResult = null;
-            string messageResult = null;
-
             backplane.Setup(b => b.Publish(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.FromResult(0));
 
