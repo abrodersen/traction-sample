@@ -23,11 +23,15 @@ namespace Server
 
     internal class ClientData
     {
+        public const int BUFFER_SIZE = 1 << 12;
+
         public long Id {get;set;}
         public string Room {get; set;}
         public TaskCompletionSource<bool> Handle {get;set;}
         public WebSocket Socket {get;set;}
-        public List<byte[]> Buffers {get;set;} = new List<byte[]>();
+
+        public byte[] Buffer {get;set;} = new byte[BUFFER_SIZE];
+        public List<byte> CurrentMessage {get;set;} = new List<byte>();
         public Task<WebSocketReceiveResult> Receive {get;set;}
         public CancellationTokenSource CancelReceive {get;set;}
     }
@@ -68,7 +72,7 @@ namespace Server
             _logger.LogDebug("connection management service initialized");
         }
 
-        public const int BUFFER_SIZE = 1 << 12;
+        
 
         public Task RegisterConnection(string roomId, WebSocket socket)
         {
@@ -95,11 +99,8 @@ namespace Server
 
         private static void BeginReceive(ClientData data)
         {
-            var rxBuffer = new byte[BUFFER_SIZE];
             var rxCancel = new CancellationTokenSource();
-
-            data.Receive = data.Socket.ReceiveAsync(new ArraySegment<byte>(rxBuffer), rxCancel.Token);
-            data.Buffers.Add(rxBuffer);
+            data.Receive = data.Socket.ReceiveAsync(new ArraySegment<byte>(data.Buffer), rxCancel.Token);
             data.CancelReceive = rxCancel;
         }
 
@@ -288,16 +289,14 @@ namespace Server
                         if (whenClient.Result.IsCompletedSuccessfully)
                         {
                             var clientRxResult = whenClient.Result.Result;
+                            var receivedData = Enumerable.Range(0, clientRxResult.Count).Select(i => client.Buffer[i]);
+                            client.CurrentMessage.AddRange(receivedData);
+
                             if (clientRxResult.EndOfMessage)
                             {
-                                var allBytes = new List<byte>();
-                                foreach (var buffer in client.Buffers)
-                                {
-                                    allBytes.AddRange(buffer);
-                                }
-                                var message = Encoding.UTF8.GetString(allBytes.ToArray());
+                                var message = Encoding.UTF8.GetString(client.CurrentMessage.ToArray());
                                 _logger.LogDebug("received message {message}", message);
-                                client.Buffers.Clear();
+                                client.CurrentMessage.Clear();
 
                                 newSendOperations.AddRange(SendToRoom(message, room, client.Id));
 
