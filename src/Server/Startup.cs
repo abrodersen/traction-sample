@@ -28,13 +28,20 @@ namespace Server
             services.AddSingleton<IHostedService, ConnectionManagementService>(
 	            sp => sp.GetService<ConnectionManagementService>());
 
-            services.AddSingleton<AzureServiceBusBackplane>();
-            services.AddSingleton<IMessagingBackplane, AzureServiceBusBackplane>(
-                sp => sp.GetService<AzureServiceBusBackplane>());
-            services.AddSingleton<IHostedService, AzureServiceBusBackplane>(
-                sp => sp.GetService<AzureServiceBusBackplane>());
+            if (Configuration.GetSection("backplane").Get<string>() == "azure")
+            {
+                services.AddSingleton<AzureServiceBusBackplane>();
+                services.AddSingleton<IMessagingBackplane, AzureServiceBusBackplane>(
+                    sp => sp.GetService<AzureServiceBusBackplane>());
+                services.AddSingleton<IHostedService, AzureServiceBusBackplane>(
+                    sp => sp.GetService<AzureServiceBusBackplane>());
 
-            services.Configure<AzureServiceBusBackplaneOptions>(Configuration.GetSection("azure"));
+                services.Configure<AzureServiceBusBackplaneOptions>(Configuration.GetSection("azure"));
+            }
+            else
+            {
+                services.AddSingleton<IMessagingBackplane, DummyBackplane>();
+            }
 
             services.AddControllersWithViews();
 
