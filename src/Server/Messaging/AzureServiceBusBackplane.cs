@@ -91,6 +91,7 @@ namespace Server.Messaging
             var subscriptionParams = new SBSubscription
             {
                 AutoDeleteOnIdle = TimeSpan.FromMinutes(5),
+                MaxDeliveryCount = 1,
             };
 
             _logger.LogInformation("registering subscription");

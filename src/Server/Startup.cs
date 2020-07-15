@@ -23,9 +23,18 @@ namespace Server
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddSingleton<ConnectionManagementService>();
+            services.AddSingleton<IConnectionManagementService, ConnectionManagementService>(
+                sp => sp.GetService<ConnectionManagementService>());
             services.AddSingleton<IHostedService, ConnectionManagementService>(
-	            serviceProvider => serviceProvider.GetService<ConnectionManagementService>());
-            services.AddSingleton<IMessagingBackplane, DummyBackplane>();
+	            sp => sp.GetService<ConnectionManagementService>());
+
+            services.AddSingleton<AzureServiceBusBackplane>();
+            services.AddSingleton<IMessagingBackplane, AzureServiceBusBackplane>(
+                sp => sp.GetService<AzureServiceBusBackplane>());
+            services.AddSingleton<IHostedService, AzureServiceBusBackplane>(
+                sp => sp.GetService<AzureServiceBusBackplane>());
+
+            services.Configure<AzureServiceBusBackplaneOptions>(Configuration.GetSection("azure"));
 
             services.AddControllersWithViews();
 
