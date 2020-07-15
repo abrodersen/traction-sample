@@ -34,11 +34,12 @@ namespace Server.Messaging
         private readonly AzureServiceBusBackplaneOptions _options;
         private readonly ILogger<AzureServiceBusBackplane> _logger;
 
-        private readonly List<AzureServiceBusSubscription> _subscriptions = new List<AzureServiceBusSubscription>();
-        private readonly SemaphoreSlim _subscriptionLock = new SemaphoreSlim(1, 1);
+        private readonly ConcurrentDictionary<string, AzureServiceBusSubscription> _subscriptions = new ConcurrentDictionary<string, AzureServiceBusSubscription>();
         private readonly ConcurrentQueue<AzureServiceBusSubscription> _pending = new ConcurrentQueue<AzureServiceBusSubscription>();
         private readonly SemaphoreSlim _subscribeSignal = new SemaphoreSlim(0);
         private readonly SemaphoreSlim _unsubscribeSignal = new SemaphoreSlim(0);
+
+        private readonly TopicClient _topicClient;
 
         public AzureServiceBusBackplane(
             IOptions<AzureServiceBusBackplaneOptions> options,
@@ -46,21 +47,24 @@ namespace Server.Messaging
         {
             _options = options.Value;
             _logger = logger;
+
+            _topicClient = new TopicClient(_options.ServiceBusConnectionString, _options.Topic, RetryPolicy.NoRetry);
         }
 
-        public async Task Initialize(CancellationToken token)
+        public async Task Publish(string topic, string message, CancellationToken token)
         {
-            
-        }
-
-        public Task Publish(string topic, string message, CancellationToken token)
-        {
-            throw new System.NotImplementedException();
+            var datagram = new Message();
+            datagram.Body = Encoding.UTF8.GetBytes(message);
+            datagram.Label = topic;
+            await _topicClient.SendAsync(datagram).ConfigureAwait(false);
         }
 
         public ISubscription Subscribe(string topic)
         {
-            throw new System.NotImplementedException();
+            var subscription = new AzureServiceBusSubscription(topic, _unsubscribeSignal);
+            _pending.Enqueue(subscription);
+            _subscribeSignal.Release();
+            return subscription;
         }
 
         internal async Task<TokenCredentials> GetCredentialsAsync(CancellationToken token)
@@ -127,6 +131,8 @@ namespace Server.Messaging
 
         internal async Task AddRule(SBSubscription subscription, string newTopic, CancellationToken token)
         {
+            _logger.LogDebug("adding rule for {topic} to subscription {subscription}", newTopic, subscription.Name);
+
             var creds = await GetCredentialsAsync(token).ConfigureAwait(false);
             var client = new ServiceBusManagementClient(creds)
             {
@@ -148,17 +154,82 @@ namespace Server.Messaging
                 parameters: rule,
                 cancellationToken: token
             ).ConfigureAwait(false);
+
+            _logger.LogDebug("rule for {topic} added to subscription {subscription}", newTopic, subscription.Name);
+        }
+
+        internal async Task DeleteRule(SBSubscription subscription, string deleteTopic, CancellationToken token)
+        {
+            _logger.LogDebug("deleting rule for {topic} from subscription {subscription}", deleteTopic, subscription.Name);
+
+            var creds = await GetCredentialsAsync(token).ConfigureAwait(false);
+            var client = new ServiceBusManagementClient(creds)
+            {
+                SubscriptionId = _options.SubscriptionId,
+            };
+
+            await client.Rules.DeleteAsync(
+                resourceGroupName: _options.ResourceGroup,
+                namespaceName: _options.Namespace,
+                topicName: _options.Topic,
+                subscriptionName: subscription.Name,
+                ruleName: deleteTopic,
+                cancellationToken: token
+            ).ConfigureAwait(false);
+
+            _logger.LogDebug("rule for {topic} from subscription {subscription}", deleteTopic, subscription.Name);
+        }
+
+        internal async Task UpdateRules(SBSubscription subscription, CancellationToken token)
+        {
+            while (_pending.TryDequeue(out var topicSub))
+            {
+                try
+                {
+                    await AddRule(subscription, topicSub.Topic, token).ConfigureAwait(false);
+                    _subscriptions.TryAdd(topicSub.Topic, topicSub);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "error while trying to add rule for {topic}", topicSub.Topic);
+                    _pending.Enqueue(topicSub);
+                    throw;
+                }
+            }
+
+            foreach (var s in _subscriptions)
+            {
+                if (s.Value.Disposed)
+                {
+                    _subscriptions.TryRemove(s.Key, out var _);
+                    await DeleteRule(subscription, s.Key, token);
+                }
+            }
+        }
+
+        internal void HandleBackplaneMessage(SubscriptionClient client, Message message, CancellationToken token)
+        {
+            foreach (var subscription in _subscriptions)
+            {
+                if (subscription.Key == message.Label)
+                {
+                    var decoded = Encoding.UTF8.GetString(message.Body);
+                    subscription.Value.Push(decoded);
+                }
+            }
         }
 
         protected override async Task ExecuteAsync(CancellationToken token)
         {
             while (true)
             {
+                SubscriptionClient serviceBusClient = null;
+
                 try
                 {
                     var subscription = await InitializeAzureServiceBus(token).ConfigureAwait(false);
 
-                    var serviceBusClient = new SubscriptionClient(
+                    serviceBusClient = new SubscriptionClient(
                         connectionString: _options.ServiceBusConnectionString,
                         topicPath: _options.Topic,
                         subscriptionName: subscription.Name,
@@ -173,61 +244,35 @@ namespace Server.Messaging
                         MaxConcurrentCalls = 1,
                     };
 
-                    serviceBusClient.RegisterMessageHandler(async (msg, token) =>
+                    serviceBusClient.RegisterMessageHandler((msg, token) =>
                     {
-                        if (!await _subscriptionLock.WaitAsync(100))
-                        {
-                            await serviceBusClient.AbandonAsync(msg.SystemProperties.LockToken);
-                            return;
-                        }
-
-                        try
-                        {
-                            foreach (var subscription in _subscriptions)
-                            {
-                                if (subscription.Topic == msg.Label)
-                                {
-                                    var decoded = Encoding.UTF8.GetString(msg.Body);
-                                    subscription.Push(decoded);
-                                }
-                            }
-                        }
-                        finally
-                        {
-                            _subscriptionLock.Release();
-                        }
+                        this.HandleBackplaneMessage(serviceBusClient, msg, token);
+                        return Task.FromResult(0);
                     }, opts);
+
+                    Task newSubscriptionSignal = _subscribeSignal.WaitAsync();
+                    Task subscriptionDisposeSignal = _unsubscribeSignal.WaitAsync();
 
                     while (true)
                     {
                         try
                         {
-
-
-                            while (_pending.TryDequeue(out var topicSub))
+                            var result = await Task.WhenAny(newSubscriptionSignal, subscriptionDisposeSignal);
+                            if (result == newSubscriptionSignal)
                             {
-                                try
-                                {
-                                    await AddRule(subscription, topicSub.Topic, token).ConfigureAwait(false);
-                                    _subscriptions.Add(topicSub);
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogError(ex, "error while trying to add rule for {topic}", topicSub.Topic);
-                                    _pending.Enqueue(topicSub);
-                                    throw;
-                                }
+                                newSubscriptionSignal = _subscribeSignal.WaitAsync();
+                            }
+                            else if (result == subscriptionDisposeSignal)
+                            {
+                                subscriptionDisposeSignal = _unsubscribeSignal.WaitAsync();
                             }
 
-                            for (int i = _subscriptions.Count - 1; i >= 0; i--)
-                            {
-                                var oldSub = _subscriptions[i];
-                                if (oldSub.Disposed)
-                                {
-                                    _subscriptions.RemoveAt(i);
-                                }
-                            }
-
+                            await UpdateRules(subscription, token);
+                        }
+                        catch (TaskCanceledException)
+                        {
+                            _logger.LogDebug("inner loop cancelled");
+                            throw;
                         }
                         catch(Exception ex)
                         {
@@ -235,14 +280,25 @@ namespace Server.Messaging
                         }
                     }
                 }
+                catch (TaskCanceledException)
+                {
+                    _logger.LogDebug("outer loop cancelled");
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "unhandled exception in outer loop control loop");
                 }
 
+                _logger.LogDebug("closing backplane connection");
+                Task close = serviceBusClient?.CloseAsync();
+                if (close != null)
+                {
+                    await close;
+                }
+
+                _logger.LogDebug("something happend in the loop, retrying after a short delay");
                 await Task.Delay(100);
             }
-            
         }
     }
 
@@ -269,7 +325,7 @@ namespace Server.Messaging
             _disposeSignal.Release();
         }
 
-        public void Push(string message)
+        internal void Push(string message)
         {
             _messageQueue.Enqueue(message);
             _messageSignal.Release();

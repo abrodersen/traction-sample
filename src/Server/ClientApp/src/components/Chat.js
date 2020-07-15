@@ -6,7 +6,9 @@ export class Chat extends Component {
   constructor(props) {
     super(props);
     const { id } = props.match.params;
-    let wsUri = 'ws://' + location.host + '/api/rooms/' + id;
+
+    let scheme = window.location.protocol == 'https' ? 'wss' : 'ws';
+    let wsUri = scheme + '://' + window.location.host + '/api/rooms/' + id;
     console.log('connecting to ' + wsUri);
     this.ws = new WebSocket(wsUri)
 
