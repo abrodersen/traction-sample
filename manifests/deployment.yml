@@ -32,7 +32,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: traction-sample
-                  key: client-id
+                  key: client-secret
             - name: AZURE__SERVICEBUSCONNECTIONSTRING
               valueFrom:
                 secretKeyRef:
