@@ -16,6 +16,7 @@ variables:
   containerRegistry: 'tractionsample.azurecr.io'
   dockerfilePath: 'Dockerfile'
   tag: '$(Build.BuildId)'
+  k8sServiceConnection: 
   k8sNamespace: default
   appSecret: traction-sample
   
@@ -73,10 +74,11 @@ stages:
           - task: KubernetesManifest@0
             displayName: Create secret
             inputs:
-              action: createSecret
-              secretName: $(appSecret)
-              namespace: $(k8sNamespace)
-              dockerRegistryEndpoint: $(dockerRegistryServiceConnection)
+              action: 'createSecret'
+              namespace: '$(k8sNamespace)'
+              secretType: 'generic'
+              secretName: '$(appSecret)'
+              secretArguments: '--from-literal=client-id=$(clientid)'
               
           - task: KubernetesManifest@0
             displayName: Deploy to Kubernetes cluster
@@ -84,10 +86,10 @@ stages:
               action: deploy
               namespace: $(k8sNamespace)
               manifests: |
-                $(System.ArtifactsDirectory)/manifests/deployment.yml
-                $(System.ArtifactsDirectory)/manifests/service.yml
-              imagePullSecrets: |
-                $(imagePullSecret)
+                $(System.ArtifactsDirectory)/manifests/deployment.yaml
+                $(System.ArtifactsDirectory)/manifests/service.yaml
+                $(System.ArtifactsDirectory)/manifests/ingress.yaml
+                $(System.ArtifactsDirectory)/manifests/certificate.yaml
               containers: |
                 $(containerRegistry)/$(imageRepository):$(tag)
     
