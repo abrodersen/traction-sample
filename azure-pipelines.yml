@@ -94,4 +94,5 @@ stages:
                 $(System.ArtifactsDirectory)/manifests/ingress.yml
                 $(System.ArtifactsDirectory)/manifests/certificate.yml
               containers: '$(containerRegistry)/$(imageRepository):$(tag)'
+              imagePullSecrets: ''
     
