@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: traction-sample
-          image: tractionsample.azurecr.io/traction-sample:latest
+          image: tractionsample.azurecr.io/tractionsample:10
           ports:
             - name: http
               protocol: TCP
