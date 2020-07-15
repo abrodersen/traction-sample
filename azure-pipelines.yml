@@ -57,6 +57,8 @@ stages:
         path: 'manifests'
 - stage: deploy
   dependsOn: build
+  variables:
+  - group: secrets
   jobs:
   - deployment: deploy
     pool:
@@ -78,7 +80,9 @@ stages:
               namespace: '$(k8sNamespace)'
               secretType: 'generic'
               secretName: '$(appSecret)'
-              secretArguments: '--from-literal=client-id=$(clientid)'
+              secretArguments: |
+                --from-literal=client-id=$(clientid)
+                --from-literal=service-bus-connection-string=$(servicebusconnectionstring)
               
           - task: KubernetesManifest@0
             displayName: Deploy to Kubernetes cluster
@@ -86,10 +90,10 @@ stages:
               action: deploy
               namespace: $(k8sNamespace)
               manifests: |
-                $(System.ArtifactsDirectory)/manifests/deployment.yaml
-                $(System.ArtifactsDirectory)/manifests/service.yaml
-                $(System.ArtifactsDirectory)/manifests/ingress.yaml
-                $(System.ArtifactsDirectory)/manifests/certificate.yaml
+                $(System.ArtifactsDirectory)/manifests/deployment.yml
+                $(System.ArtifactsDirectory)/manifests/service.yml
+                $(System.ArtifactsDirectory)/manifests/ingress.yml
+                $(System.ArtifactsDirectory)/manifests/certificate.yml
               containers: |
                 $(containerRegistry)/$(imageRepository):$(tag)
     
