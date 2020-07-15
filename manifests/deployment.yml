@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traction-sample
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: traction-sample
+    spec:
+      containers:
+        - name: traction-sample
+          ports:
+            - name: http
+              protocol: TCP
+              containerPort: 80
+          env:
+            - name: BACKPLANE
+              value: azure
+            - name: AZURE__SUBSCRIPTIONID
+              value: 5f1f1c46-c957-4390-9351-9aee2692f6b0
+            - name: AZURE__TENANTID
+              value: 94d53b45-5980-4416-8488-132678e2fe7a
+            - name: AZURE__CLIENTID
+              value: c5eebf62-4c0f-4938-bc09-223a6aa253b2
+            - name: AZURE__CLIENTSECRET
+              valueFrom:
+                secretKeyRef:
+                  name: traction-sample
+                  key: client-id
+            - name: AZURE__SERVICEBUSCONNECTIONSTRING
+              valueFrom:
+                secretKeyRef:
+                  name: traction-sample
+                  key: service-bus-connection-string
+            - name: AZURE__RESOURCEGROUP
+              value: traction-sample
+            - name: AZURE__NAMESPACE
+              value: tractionsample
+            - name: AZURE__TOPIC
+              value: tractionsample
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

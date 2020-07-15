@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: traction-sample
+spec:
+  tls:
+  - hosts:
+      - traction-sample.abrodersen.com
+    secretName: traction-sample-cert
+  rules:
+  - host: traction-sample.abrodersen.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          serviceName: test
+          servicePort: 80

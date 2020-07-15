@@ -1,0 +1,42 @@
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    email: aaron@abrodersen.com
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+    - dns01:
+        cloudflare:
+          email: aaron@abrodersen.com
+          apiTokenSecretRef:
+            name: cloudflare-apitoken-secret
+            key: apitoken
+      selector:
+        dnsNames:
+        - 'traction-sample.abrodersen.com'
+---
+apiVersion: cert-manager.io/v1alpha2
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    email: aaron@abrodersen.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+    - dns01:
+        cloudflare:
+          email: aaron@abrodersen.com
+          apiTokenSecretRef:
+            name: cloudflare-apitoken-secret
+            key: apitoken
+      selector:
+        dnsNames:
+        - 'traction-sample.abrodersen.com'

@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1alpha2
+kind: Certificate
+metadata:
+  name: traction-sample
+spec:
+  secretName: traction-sample-cert
+  dnsNames:
+  - traction-sample.abrodersen.com
+  issuerRef:
+    name: letsencrypt-staging
+    kind: ClusterIssuer
+    group: cert-manager.io
