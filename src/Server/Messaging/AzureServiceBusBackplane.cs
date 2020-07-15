@@ -56,6 +56,7 @@ namespace Server.Messaging
             var datagram = new Message();
             datagram.Body = Encoding.UTF8.GetBytes(message);
             datagram.Label = topic;
+            datagram.ReplyTo = Environment.MachineName;
             await _topicClient.SendAsync(datagram).ConfigureAwait(false);
         }
 
@@ -140,11 +141,10 @@ namespace Server.Messaging
                 SubscriptionId = _options.SubscriptionId,
             };
 
-            var filter = new Microsoft.Azure.Management.ServiceBus.Models.CorrelationFilter();
-            filter.Label = newTopic;
+            var filter = new Microsoft.Azure.Management.ServiceBus.Models.SqlFilter($"label = '{newTopic}' and replyto <> '{subscription.Name}'");
 
             var rule = new Rule();
-            rule.CorrelationFilter = filter;
+            rule.SqlFilter = filter;
 
             await client.Rules.CreateOrUpdateAsync(
                 resourceGroupName: _options.ResourceGroup,
@@ -278,6 +278,7 @@ namespace Server.Messaging
                         catch(Exception ex)
                         {
                             _logger.LogError(ex, "unhandled exeption in inner control loop");
+                            await Task.Delay(100);
                         }
                     }
                 }
@@ -298,7 +299,7 @@ namespace Server.Messaging
                 }
 
                 _logger.LogDebug("something happend in the loop, retrying after a short delay");
-                await Task.Delay(100);
+                await Task.Delay(5000);
             }
         }
     }
