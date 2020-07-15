@@ -80,9 +80,7 @@ stages:
               namespace: '$(k8sNamespace)'
               secretType: 'generic'
               secretName: '$(appSecret)'
-              secretArguments: |
-                --from-literal=client-id=$(clientid)
-                --from-literal=service-bus-connection-string=$(servicebusconnectionstring)
+              secretArguments: '--from-literal=client-id=$(clientid) --from-literal=service-bus-connection-string=$(servicebusconnectionstring)'
               
           - task: KubernetesManifest@0
             displayName: Deploy to Kubernetes cluster
