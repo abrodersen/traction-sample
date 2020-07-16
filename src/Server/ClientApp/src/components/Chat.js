@@ -23,10 +23,11 @@ export class Chat extends Component {
   };
 
   resetTimer() {
-    if (this.resetTimer) {
-      clearTimeout(this.resetTimer);
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
     }
-    this.resetTimer = setTimeout(this.resetWebsocket.bind(this), 10000);
+    this.timer = setTimeout(this.resetWebsocket.bind(this), 10000);
   }
 
   resetWebsocket() {
