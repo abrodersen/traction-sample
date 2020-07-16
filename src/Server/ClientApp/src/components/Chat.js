@@ -22,6 +22,13 @@ export class Chat extends Component {
     };
   };
 
+  resetTimer() {
+    if (this.resetTimer) {
+      clearTimeout(this.resetTimer);
+    }
+    this.resetTimer = setTimeout(this.resetWebsocket.bind(this), 10000);
+  }
+
   resetWebsocket() {
     let wsUri = getWsUri(this.room);
     console.log('connecting to ' + wsUri);
@@ -29,12 +36,16 @@ export class Chat extends Component {
 
     this.ws.onopen = () => {
       // on connecting, do nothing but log it to the console
-      console.log('connected')
+      console.log('connected');
+      this.resetTimer();
     }
-
+    
     this.ws.onmessage = evt => {
       // on receiving a message, add it to the list of messages
       const message = JSON.parse(evt.data);
+      if (message.type == 'keepalive') {
+        this.resetTimer();
+      }
       if (message.type == 'chat') {
         this.addMessage(message);
       }

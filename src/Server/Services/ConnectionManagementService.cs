@@ -210,7 +210,8 @@ namespace Server
                             var client = pair.Value.Clients[i];
                             if (IsSocketDead(client.Socket))
                             {
-                                _logger.LogInformation("detected a dead client {client} in room {room}", client.Id, client.Room);
+                                var state = Enum.GetName(typeof(WebSocketState), client.Socket.State);
+                                _logger.LogInformation("detected a dead client {client} in room {room} due to {state}", client.Id, client.Room, state);
                                 client.Socket.Abort();
                                 pair.Value.Clients.RemoveAt(i);
                             }
