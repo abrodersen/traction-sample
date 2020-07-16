@@ -7,6 +7,6 @@ spec:
   dnsNames:
   - traction-sample.abrodersen.com
   issuerRef:
-    name: letsencrypt-staging
+    name: letsencrypt-prod
     kind: ClusterIssuer
     group: cert-manager.io
