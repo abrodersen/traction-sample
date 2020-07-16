@@ -28,6 +28,8 @@ namespace Server
             services.AddSingleton<IHostedService, ConnectionManagementService>(
 	            sp => sp.GetService<ConnectionManagementService>());
 
+            services.Configure<ConnectionManagementServiceOptions>(Configuration);
+
             if (Configuration.GetSection("backplane").Get<string>() == "azure")
             {
                 services.AddSingleton<AzureServiceBusBackplane>();

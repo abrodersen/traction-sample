@@ -10,6 +10,7 @@ using System.Collections.Concurrent;
 using Server.Messaging;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 
 namespace Server
 {
@@ -53,6 +54,11 @@ namespace Server
         public string Room {get;set;}
     }
 
+    public class ConnectionManagementServiceOptions
+    {
+        public bool EnableKeepalive {get;set;} = true;
+    }
+
     internal class ConnectionManagementService : BackgroundService, IConnectionManagementService
     {
         private readonly SortedList<string, RoomData> _rooms = new SortedList<string, RoomData>();
@@ -62,16 +68,21 @@ namespace Server
 
         private readonly IMessagingBackplane _backplane;
         private readonly ILogger<ConnectionManagementService> _logger;
+        private readonly ConnectionManagementServiceOptions _options;
 
         private Task _sleep;
         private long _connectionId = 0;
 
-        public ConnectionManagementService(IMessagingBackplane backplane, ILogger<ConnectionManagementService> logger)
+        public ConnectionManagementService(
+            IMessagingBackplane backplane,
+            ILogger<ConnectionManagementService> logger,
+            IOptions<ConnectionManagementServiceOptions> options)
         {
             _backplane = backplane;
             _logger = logger;
 
             _logger.LogDebug("connection management service initialized");
+            _options = options.Value;
         }
 
         
@@ -259,7 +270,7 @@ namespace Server
 
                     if (_sleep == null)
                     {
-                        _sleep = Task.Delay(5000);
+                        _sleep = _options.EnableKeepalive ? Task.Delay(5000) : Task.Delay(-1);
                     }
 
                     var newClientTask = _newClient.WaitAsync();
