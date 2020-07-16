@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -27,7 +28,8 @@ namespace Server.Messaging
         public async Task<string> Next(CancellationToken token)
         {
             await Task.Delay(2500);
-            return (_count++).ToString();
+            var data = new { type = "chat", name = "generated", message = $"message{_count++}" };
+            return JsonSerializer.Serialize(data);
         }
     }
 }

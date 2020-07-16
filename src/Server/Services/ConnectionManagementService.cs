@@ -369,7 +369,7 @@ namespace Server
                         var message = JsonSerializer.Serialize(new { type = "keepalive" });
                         foreach (var room in _rooms)
                         {
-                            newSendOperations.AddRange(SendToRoom(room.Key, room.Value));
+                            newSendOperations.AddRange(SendToRoom(message, room.Value));
                         }
                     }
 

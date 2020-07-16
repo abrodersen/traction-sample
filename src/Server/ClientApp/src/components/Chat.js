@@ -25,7 +25,7 @@ export class Chat extends Component {
   resetWebsocket() {
     let wsUri = getWsUri(this.room);
     console.log('connecting to ' + wsUri);
-    this.ws = new WebSocket(wsUri)
+    this.ws = new WebSocket(wsUri);
 
     this.ws.onopen = () => {
       // on connecting, do nothing but log it to the console
@@ -34,7 +34,7 @@ export class Chat extends Component {
 
     this.ws.onmessage = evt => {
       // on receiving a message, add it to the list of messages
-      const message = JSON.parse(evt.data)
+      const message = JSON.parse(evt.data);
       if (message.type == 'chat') {
         this.addMessage(message);
       }
@@ -50,7 +50,8 @@ export class Chat extends Component {
   sendKeepalive() {
     if (this.ws && this.ws.readyState == WebSocket.OPEN) {
       let msg = { type: 'keepalive' };
-      this.ws.send(msg);
+      let data = JSON.stringify(msg);
+      this.ws.send(data);
     }
   }
 
