@@ -9,6 +9,7 @@ using System.Linq;
 using System.Collections.Concurrent;
 using Server.Messaging;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Server
 {
@@ -62,6 +63,7 @@ namespace Server
         private readonly IMessagingBackplane _backplane;
         private readonly ILogger<ConnectionManagementService> _logger;
 
+        private Task _sleep;
         private long _connectionId = 0;
 
         public ConnectionManagementService(IMessagingBackplane backplane, ILogger<ConnectionManagementService> logger)
@@ -254,8 +256,13 @@ namespace Server
                         whenSend = Task.WhenAny(sendTaskList);
                     }
 
+                    if (_sleep == null)
+                    {
+                        _sleep = Task.Delay(5000);
+                    }
+
                     var newClientTask = _newClient.WaitAsync();
-                    var globalTaskList = new Task[] { whenRoom, whenClient, whenSend, newClientTask}.Where(t => t != null).ToList();
+                    var globalTaskList = new Task[] { whenRoom, whenClient, whenSend, newClientTask, _sleep }.Where(t => t != null).ToList();
                     _logger.LogDebug("waiting for signal from {tasks} tasks", globalTaskList.Count);
                     var completed = await Task.WhenAny(globalTaskList).ConfigureAwait(false);                
                     _logger.LogDebug("awoke");
@@ -354,6 +361,16 @@ namespace Server
                     else if (completed == newClientTask)
                     {
                         _logger.LogDebug("receivied signal on new client channel");
+                    }
+                    else if (completed == _sleep)
+                    {
+                        _logger.LogDebug("receivied signal on keepalive timer");
+                        _sleep = null;
+                        var message = JsonSerializer.Serialize(new { type = "keepalive" });
+                        foreach (var room in _rooms)
+                        {
+                            newSendOperations.AddRange(SendToRoom(room.Key, room.Value));
+                        }
                     }
 
                     _sendOperations.AddRange(newSendOperations);

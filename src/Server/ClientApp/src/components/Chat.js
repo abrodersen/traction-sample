@@ -34,9 +34,10 @@ export class Chat extends Component {
 
     this.ws.onmessage = evt => {
       // on receiving a message, add it to the list of messages
-      // const message = JSON.parse(evt.data)
-      let msg = { name: 'anon', message: evt.data};
-      this.addMessage(msg)
+      const message = JSON.parse(evt.data)
+      if (message.type == 'chat') {
+        this.addMessage(message);
+      }
     }
 
     this.ws.onclose = () => {
@@ -46,16 +47,25 @@ export class Chat extends Component {
     }
   }
 
+  sendKeepalive() {
+    if (this.ws && this.ws.readyState == WebSocket.OPEN) {
+      let msg = { type: 'keepalive' };
+      this.ws.send(msg);
+    }
+  }
+
   componentDidMount() {
     this.resetWebsocket();
+    setInterval(this.sendKeepalive.bind(this), 5000);
   }
 
   addMessage = message =>
     this.setState(state => ({ messages: [message, ...state.messages] }))
 
   submitMessage = messageString => {
-    const message = { name: this.state.name, message: messageString }
-    this.ws.send(messageString)
+    const message = { type: 'chat', name: this.state.name, message: messageString }
+    let data = JSON.stringify(message);
+    this.ws.send(data)
     this.addMessage(message)
   }
 
