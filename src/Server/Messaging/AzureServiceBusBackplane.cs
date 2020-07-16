@@ -133,7 +133,7 @@ namespace Server.Messaging
 
         internal async Task AddRule(SBSubscription subscription, string newTopic, CancellationToken token)
         {
-            _logger.LogDebug("adding rule for {topic} to subscription {subscription}", newTopic, subscription.Name);
+            _logger.LogInformation("adding rule for {topic} to subscription {subscription}", newTopic, subscription.Name);
 
             var creds = await GetCredentialsAsync(token).ConfigureAwait(false);
             var client = new ServiceBusManagementClient(creds)
@@ -156,12 +156,12 @@ namespace Server.Messaging
                 cancellationToken: token
             ).ConfigureAwait(false);
 
-            _logger.LogDebug("rule for {topic} added to subscription {subscription}", newTopic, subscription.Name);
+            _logger.LogInformation("rule for {topic} added to subscription {subscription}", newTopic, subscription.Name);
         }
 
         internal async Task DeleteRule(SBSubscription subscription, string deleteTopic, CancellationToken token)
         {
-            _logger.LogDebug("deleting rule for {topic} from subscription {subscription}", deleteTopic, subscription.Name);
+            _logger.LogInformation("deleting rule for {topic} from subscription {subscription}", deleteTopic, subscription.Name);
 
             var creds = await GetCredentialsAsync(token).ConfigureAwait(false);
             var client = new ServiceBusManagementClient(creds)
@@ -178,7 +178,7 @@ namespace Server.Messaging
                 cancellationToken: token
             ).ConfigureAwait(false);
 
-            _logger.LogDebug("rule for {topic} from subscription {subscription}", deleteTopic, subscription.Name);
+            _logger.LogInformation("rule for {topic} from subscription {subscription}", deleteTopic, subscription.Name);
         }
 
         internal async Task UpdateRules(SBSubscription subscription, CancellationToken token)

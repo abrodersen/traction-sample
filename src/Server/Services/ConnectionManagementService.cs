@@ -76,11 +76,12 @@ namespace Server
 
         public Task RegisterConnection(string roomId, WebSocket socket)
         {
-            _logger.LogInformation("new client registered in room {room}", roomId);
+            var id = Interlocked.Increment(ref _connectionId);
+            _logger.LogInformation("new client {client} registered in room {room}", id, roomId);
             var requestEnd = new TaskCompletionSource<bool>();
             var data = new ClientData
             {
-                Id = Interlocked.Increment(ref _connectionId),
+                Id = id,
                 Room = roomId,
                 Socket = socket,
                 Handle = requestEnd,
@@ -207,7 +208,7 @@ namespace Server
                             var client = pair.Value.Clients[i];
                             if (IsSocketDead(client.Socket))
                             {
-                                _logger.LogDebug("detected a dead client {client} in room {room}", client.Id, client.Room);
+                                _logger.LogInformation("detected a dead client {client} in room {room}", client.Id, client.Room);
                                 client.Socket.Abort();
                                 pair.Value.Clients.RemoveAt(i);
                             }
