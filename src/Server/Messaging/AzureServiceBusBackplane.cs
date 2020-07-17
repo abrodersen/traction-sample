@@ -56,7 +56,7 @@ namespace Server.Messaging
             var datagram = new Message();
             datagram.Body = Encoding.UTF8.GetBytes(message);
             datagram.Label = topic;
-            datagram.ReplyTo = Environment.MachineName;
+            datagram.UserProperties["From"] = Environment.MachineName;
             await _topicClient.SendAsync(datagram).ConfigureAwait(false);
         }
 
@@ -141,7 +141,9 @@ namespace Server.Messaging
                 SubscriptionId = _options.SubscriptionId,
             };
 
-            var filter = new Microsoft.Azure.Management.ServiceBus.Models.SqlFilter($"label = '{newTopic}' and replyto <> '{subscription.Name}'");
+            var filter = new Microsoft.Azure.Management.ServiceBus.Models.SqlFilter(
+                $"sys.Label='{newTopic}' AND From <> '{subscription.Name}'"
+            );
 
             var rule = new Rule();
             rule.SqlFilter = filter;
